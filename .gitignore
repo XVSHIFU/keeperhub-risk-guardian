@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/
+
+# Build output
+dist/
+build/
+.cache/
+.turbo/
+.parcel-cache/
+
+# ElizaOS runtime database & generated data
+.eliza/
+.eliza/*
+data/
+*.sqlite
+*.sqlite-journal
+
+# Environment / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.env
+secrets.json
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Test / coverage
+coverage/
+.nyc_output/
+cypress/screenshots/
+cypress/videos/
+
+# Misc
+.envrc
+.direnv/
