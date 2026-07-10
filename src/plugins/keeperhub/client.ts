@@ -9,14 +9,22 @@
  * KeeperHub exposes on-chain execution as MCP tools, not REST endpoints.
  * The earlier draft of this client POSTed to `/api/execute/transfer`-style
  * REST paths — those do not exist on the live server (verified 2026-07-10).
- * The equivalent capabilities live behind the MCP server at `POST /mcp`:
+ * The equivalent capabilities live behind the MCP server at `POST /mcp`.
  *
- *   - execute_transfer             → native / ERC-20 transfer from the org wallet
- *   - execute_contract_call        → call any smart contract (view returns result, write submits)
- *   - execute_check_and_execute    → read → condition → conditional write
- *   - get_direct_execution_status  → status of a direct execution (tx hash, explorer link)
- *   - create_workflow / execute_workflow / get_execution  → visual-workflow mode
- *   - search_protocol_actions / execute_protocol_action   → DeFi protocol actions (Aave, …)
+ * ## Two execution surfaces (both via MCP)
+ * 1. Direct execution tools (snake_case fields, verified from tool schemas):
+ *      execute_protocol_action   → DeFi protocol actions (Aave repay/supply/…)
+ *      execute_transfer           → native / ERC-20 transfer from the org wallet
+ *      execute_contract_call      → call any contract function (view or write)
+ *      execute_check_and_execute → read → condition → conditional write
+ *      get_direct_execution_status → status of a direct execution
+ * 2. Workflow mode (camelCase node config): create_workflow / execute_workflow
+ *    / get_execution — build a visual workflow, trigger it, read its audit trail.
+ *
+ * Note the field-name difference: direct-execution tools use snake_case
+ * (`chain_id`, `to_address`, `function_name`), while workflow *action configs*
+ * use camelCase (`recipientAddress`, `network`). Each method below translates
+ * from the idiomatic camelCase TS interface to the tool's actual schema.
  *
  * ## Auth
  * `Authorization: Bearer <kh_ org API key>`. Create one at
@@ -52,7 +60,7 @@ export const CHAIN = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Param / result types
+// Param / result types (idiomatic camelCase; translated to tool schemas below)
 // ---------------------------------------------------------------------------
 
 export interface TransferParams {
@@ -61,20 +69,19 @@ export interface TransferParams {
   amount: string; // human-readable, e.g. "0.001"
   /** ERC-20 token address; omit for native token transfer. */
   tokenAddress?: string;
-  gasLimitMultiplier?: string;
-  /** When true, simulate only — do not broadcast. */
-  simulate?: boolean;
+  /** Optional idempotency key — replays with the same key return the original result. */
+  idempotencyKey?: string;
 }
 
 export interface ContractCallParams {
   network: string;
   contractAddress: string;
-  functionName: string; // ABI function name or full signature for overloads
+  functionName: string; // Solidity function name (e.g. "balanceOf", "transfer")
   functionArgs?: string; // JSON array string, e.g. '["0x...", "1000"]'
   abi?: string; // JSON ABI string; auto-fetched for verified contracts if omitted
   value?: string; // native value in ether (payable functions)
   gasLimitMultiplier?: string;
-  simulate?: boolean;
+  idempotencyKey?: string;
 }
 
 export interface CheckAndExecuteParams {
@@ -91,7 +98,14 @@ export interface CheckAndExecuteParams {
     abi?: string;
     gasLimitMultiplier?: string;
   };
-  simulate?: boolean;
+}
+
+/** Arguments to executeProtocolAction — actionType + the action's params. */
+export interface ProtocolActionParams {
+  /** Action identifier, e.g. "aave-v3/repay", "aave-v3/get-user-account-data". */
+  actionType: string;
+  /** Action parameters (network, asset, amount, onBehalfOf, user, …) per searchProtocolActions. */
+  params: Record<string, unknown>;
 }
 
 /** Normalized execution result surfaced to actions / agent. */
@@ -274,6 +288,15 @@ export class KeeperHubClient {
     logger.info(`[KeeperHub] MCP session ready @ ${this.mcpUrl}`);
   }
 
+  /** List all MCP tools the server exposes (name + description + inputSchema). */
+  async listTools(): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
+    await this.ensureSession();
+    const result = (await this.rpc('tools/list', {})) as {
+      tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+    };
+    return result.tools ?? [];
+  }
+
   /** Call an MCP tool by name with structured arguments. */
   async callTool<T = unknown>(name: string, args: Record<string, unknown> = {}): Promise<T> {
     await this.ensureSession();
@@ -283,7 +306,9 @@ export class KeeperHubClient {
     } catch (err) {
       // One retry after a fresh session, in case the session went stale.
       if (this.sessionId) {
-        logger.warn(`[KeeperHub] tool ${name} failed (${(err as Error).message}); retrying with fresh session`);
+        logger.warn(
+          `[KeeperHub] tool ${name} failed (${(err as Error).message}); retrying with fresh session`
+        );
         this.sessionId = null;
         await this.ensureSession();
         const result = await this.rpc('tools/call', { name, arguments: args });
@@ -293,54 +318,77 @@ export class KeeperHubClient {
     }
   }
 
-  // --- Direct execution (no workflow needed) ---
+  // --- Direct execution (no workflow needed) — snake_case per tool schemas ---
 
   /**
-   * Transfer native tokens or ERC-20s from the org wallet via the
-   * `execute_transfer` MCP tool. Gas is sponsored by KeeperHub.
+   * Execute a DeFi protocol action (Aave repay/supply/get-user-account-data, …).
+   * The actionType identifies the action; `params` holds its required fields
+   * (network, asset, amount, onBehalfOf, user, … — see searchProtocolActions).
    */
+  async executeProtocolAction(args: ProtocolActionParams): Promise<ExecutionResult> {
+    return this.callTool<ExecutionResult>('execute_protocol_action', {
+      actionType: args.actionType,
+      params: args.params,
+    });
+  }
+
+  /** Transfer native tokens or ERC-20s from the org wallet. Gas is sponsored. */
   async transfer(params: TransferParams): Promise<ExecutionResult> {
     return this.callTool<ExecutionResult>('execute_transfer', {
-      network: params.network,
-      recipientAddress: params.recipientAddress,
+      chain_id: params.network,
+      to_address: params.recipientAddress,
       amount: params.amount,
-      ...(params.tokenAddress ? { tokenAddress: params.tokenAddress } : {}),
-      ...(params.gasLimitMultiplier ? { gasLimitMultiplier: params.gasLimitMultiplier } : {}),
-      ...(params.simulate !== undefined ? { simulate: params.simulate } : {}),
+      ...(params.tokenAddress ? { token_address: params.tokenAddress } : {}),
+      ...(params.idempotencyKey ? { idempotency_key: params.idempotencyKey } : {}),
     });
   }
 
-  /** Call any smart contract function via `execute_contract_call`. */
+  /** Call any smart contract function (view returns result; write submits a tx). */
   async contractCall(params: ContractCallParams): Promise<ExecutionResult> {
     return this.callTool<ExecutionResult>('execute_contract_call', {
-      network: params.network,
-      contractAddress: params.contractAddress,
-      abiFunction: params.functionName,
-      ...(params.functionArgs ? { functionArgs: params.functionArgs } : {}),
+      contract_address: params.contractAddress,
+      chain_id: params.network,
+      function_name: params.functionName,
+      ...(params.functionArgs ? { function_args: params.functionArgs } : {}),
       ...(params.abi ? { abi: params.abi } : {}),
-      ...(params.value ? { ethValue: params.value } : {}),
-      ...(params.gasLimitMultiplier ? { gasLimitMultiplier: params.gasLimitMultiplier } : {}),
-      ...(params.simulate !== undefined ? { simulate: params.simulate } : {}),
+      ...(params.value ? { value: params.value } : {}),
+      ...(params.gasLimitMultiplier ? { gas_limit_multiplier: params.gasLimitMultiplier } : {}),
+      ...(params.idempotencyKey ? { idempotency_key: params.idempotencyKey } : {}),
     });
   }
 
-  /** Read → condition → conditional write via `execute_check_and_execute`. */
+  /**
+   * Read a contract value, evaluate a condition, and conditionally execute.
+   * (Schema partially verified; nested action shape may need a live check.)
+   */
   async checkAndExecute(params: CheckAndExecuteParams): Promise<ExecutionResult> {
     return this.callTool<ExecutionResult>('execute_check_and_execute', {
-      network: params.network,
-      contractAddress: params.contractAddress,
-      abiFunction: params.functionName,
-      ...(params.functionArgs ? { functionArgs: params.functionArgs } : {}),
+      contract_address: params.contractAddress,
+      chain_id: params.network,
+      function_name: params.functionName,
+      ...(params.functionArgs ? { function_args: params.functionArgs } : {}),
       ...(params.abi ? { abi: params.abi } : {}),
       condition: params.condition,
-      action: params.action,
-      ...(params.simulate !== undefined ? { simulate: params.simulate } : {}),
+      action: {
+        contract_address: params.action.contractAddress,
+        function_name: params.action.functionName,
+        ...(params.action.functionArgs ? { function_args: params.action.functionArgs } : {}),
+        ...(params.action.abi ? { abi: params.action.abi } : {}),
+        ...(params.action.gasLimitMultiplier
+          ? { gas_limit_multiplier: params.action.gasLimitMultiplier }
+          : {}),
+      },
     });
   }
 
-  /** Status of a direct execution (transfer / contract call). */
-  async getExecutionStatus(executionId: string): Promise<ExecutionStatus> {
+  /** Status of a direct execution (transfer / contract call / protocol action). */
+  async getDirectExecutionStatus(executionId: string): Promise<ExecutionStatus> {
     return this.callTool<ExecutionStatus>('get_direct_execution_status', { executionId });
+  }
+
+  /** Legacy alias for getDirectExecutionStatus (kept for the old action surface). */
+  async getExecutionStatus(executionId: string): Promise<ExecutionStatus> {
+    return this.getDirectExecutionStatus(executionId);
   }
 
   // --- Workflow mode (build + trigger visual workflows) ---
@@ -355,8 +403,14 @@ export class KeeperHubClient {
   }
 
   /** Trigger a manual execution of a workflow; returns executionId. */
-  async executeWorkflow(workflowId: string, input: Record<string, unknown> = {}): Promise<{ executionId: string; status: string }> {
-    return this.callTool('execute_workflow', { id: workflowId, ...(Object.keys(input).length ? { input } : {}) });
+  async executeWorkflow(
+    workflowId: string,
+    input: Record<string, unknown> = {}
+  ): Promise<{ executionId: string; status: string }> {
+    return this.callTool('execute_workflow', {
+      id: workflowId,
+      ...(Object.keys(input).length ? { input } : {}),
+    });
   }
 
   /**
@@ -369,16 +423,13 @@ export class KeeperHubClient {
     return this.callTool('get_execution', { executionId });
   }
 
-  // --- DeFi protocol actions (the write side for the risk-guardian agent) ---
+  // --- DeFi protocol discovery ---
 
-  /** Discover available DeFi protocol actions (Aave, etc.) for a network. */
-  async searchProtocolActions(query: { protocol?: string; network?: string; actionType?: string } = {}): Promise<unknown> {
+  /** Discover available DeFi protocol actions (Aave, Aerodrome, …). */
+  async searchProtocolActions(
+    query: { protocol?: string; network?: string; actionType?: string } = {}
+  ): Promise<{ count?: number; actions?: Array<Record<string, unknown>> }> {
     return this.callTool('search_protocol_actions', query as Record<string, unknown>);
-  }
-
-  /** Execute a discovered DeFi protocol action (e.g. Aave repay / supply). */
-  async executeProtocolAction(params: Record<string, unknown>): Promise<ExecutionResult> {
-    return this.callTool<ExecutionResult>('execute_protocol_action', params);
   }
 
   // --- Integrations / wallet ---
@@ -388,8 +439,7 @@ export class KeeperHubClient {
   }
 
   async getWalletIntegration(integrationId?: string): Promise<unknown> {
-    const args = integrationId ? { id: integrationId } : {};
-    return this.callTool('get_wallet_integration', args);
+    return this.callTool('get_wallet_integration', integrationId ? { id: integrationId } : {});
   }
 
   /** List available action types + their config fields (web3 / discord / …). */

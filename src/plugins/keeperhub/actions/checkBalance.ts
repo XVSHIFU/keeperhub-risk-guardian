@@ -32,9 +32,9 @@ export const checkBalanceAction: Action = {
     callback: HandlerCallback,
     _responses: Memory[]
   ): Promise<ActionResult> => {
-    const apiKey = runtime.getSetting('KEEPERHUB_API_KEY');
-    const baseUrl = runtime.getSetting('KEEPERHUB_BASE_URL') || 'https://app.keeperhub.com';
-    const defaultNetwork = runtime.getSetting('KEEPERHUB_DEFAULT_NETWORK') || 'sepolia';
+    const apiKey = runtime.getSetting('KEEPERHUB_API_KEY') as string | undefined;
+    const baseUrl = (runtime.getSetting('KEEPERHUB_BASE_URL') as string | undefined) || 'https://app.keeperhub.com';
+    const defaultNetwork = (runtime.getSetting('KEEPERHUB_DEFAULT_NETWORK') as string | undefined) || 'sepolia';
 
     if (!apiKey) {
       return {
@@ -80,19 +80,18 @@ export const checkBalanceAction: Action = {
             outputs: [{ name: 'balance', type: 'uint256' }],
             type: 'function',
           }]),
-          simulate: true,
         });
 
         await callback({
           text: `💰 **Token Balance**\n- Address: \`${address}\`\n- Token: \`${tokenAddress}\`\n- Network: ${network}\n- Balance (raw): ${result.simulatedReturnValue}`,
           action: 'CHECK_BALANCE',
-          data: result,
+          data: result as unknown as Record<string, unknown>,
         });
 
         return {
           text: `Balance check completed`,
           success: true,
-          data: result,
+          data: result as unknown as Record<string, unknown>,
         };
       } else {
         // Native token balance via contract call to check balance
@@ -100,19 +99,18 @@ export const checkBalanceAction: Action = {
           contractAddress: address,
           network,
           functionName: 'getBalance', // Will use eth_getBalance
-          simulate: true,
         });
 
         await callback({
           text: `💰 **Native Balance**\n- Address: \`${address}\`\n- Network: ${network}\n- Balance (raw): ${result.simulatedReturnValue || 'N/A'}`,
           action: 'CHECK_BALANCE',
-          data: result,
+          data: result as unknown as Record<string, unknown>,
         });
 
         return {
           text: `Balance check completed`,
           success: true,
-          data: result,
+          data: result as unknown as Record<string, unknown>,
         };
       }
     } catch (error) {

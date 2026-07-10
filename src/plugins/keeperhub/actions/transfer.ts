@@ -46,9 +46,9 @@ export const transferAction: Action = {
     callback: HandlerCallback,
     _responses: Memory[]
   ): Promise<ActionResult> => {
-    const apiKey = runtime.getSetting('KEEPERHUB_API_KEY');
-    const baseUrl = runtime.getSetting('KEEPERHUB_BASE_URL') || 'https://app.keeperhub.com';
-    const defaultNetwork = runtime.getSetting('KEEPERHUB_DEFAULT_NETWORK') || 'sepolia';
+    const apiKey = runtime.getSetting('KEEPERHUB_API_KEY') as string | undefined;
+    const baseUrl = (runtime.getSetting('KEEPERHUB_BASE_URL') as string | undefined) || 'https://app.keeperhub.com';
+    const defaultNetwork = (runtime.getSetting('KEEPERHUB_DEFAULT_NETWORK') as string | undefined) || 'sepolia';
 
     if (!apiKey) {
       return {
@@ -69,7 +69,6 @@ export const transferAction: Action = {
       const recipientAddress = content.recipientAddress || content.to;
       const amount = content.amount;
       const tokenAddress = content.tokenAddress || content.token;
-      const simulate = content.simulate === true || content.simulate === 'true';
 
       if (!recipientAddress || !amount) {
         // Ask the LLM to extract params (fallback)
@@ -91,22 +90,15 @@ export const transferAction: Action = {
         recipientAddress,
         amount,
         ...(tokenAddress ? { tokenAddress } : {}),
-        simulate,
       });
 
-      const responseText = simulate
-        ? `🔄 **Simulation Result**\n` +
-          `- From: \`${result.from}\`\n` +
-          `- To: \`${result.to}\`\n` +
-          `- Amount: ${amount} ${tokenAddress ? 'tokens' : 'native'}\n` +
-          `- Gas Estimate: ${result.gasEstimate} wei\n` +
-          `- Would Revert: ${result.wouldRevert ? '⚠️ Yes - ' + result.revertReason : '✅ No'}\n` +
-          `- Status: ${result.status}`
-        : `✅ **Transaction Executed**\n` +
-          `- Execution ID: \`${result.executionId}\`\n` +
-          `- Status: ${result.status}\n` +
-          (result.transactionHash ? `- TX Hash: \`${result.transactionHash}\`\n` : '') +
-          (result.transactionLink ? `- Explorer: ${result.transactionLink}\n` : '');
+      const responseText =
+        `✅ **Transaction Executed via KeeperHub**\n` +
+        `- Execution ID: \`${result.executionId}\`\n` +
+        `- Status: ${result.status}\n` +
+        (result.transactionHash ? `- TX Hash: \`${result.transactionHash}\`\n` : '') +
+        (result.transactionLink ? `- Explorer: ${result.transactionLink}\n` : '') +
+        `- Gas: sponsored by KeeperHub`;
 
       await callback({
         text: responseText,
@@ -117,7 +109,7 @@ export const transferAction: Action = {
       return {
         text: responseText,
         success: true,
-        data: result,
+        data: result as unknown as Record<string, unknown>,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);

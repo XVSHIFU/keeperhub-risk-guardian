@@ -27,6 +27,9 @@ import {
 import { z } from 'zod';
 import { transferAction } from './actions/transfer.ts';
 import { checkBalanceAction } from './actions/checkBalance.ts';
+import { getHealthAction } from './actions/getHealth.ts';
+import { repayAction } from './actions/repay.ts';
+import { getExecutionAuditAction } from './actions/getExecutionAudit.ts';
 import { getDeepSeekProvider } from './deepseek.ts';
 
 const configSchema = z.object({
@@ -82,8 +85,12 @@ export const keeperhubPlugin: Plugin = {
   },
 
   actions: [
-    transferAction,
-    checkBalanceAction,
+    // Risk-guardian flow: sense → act → audit, plus generic transfer/balance.
+    getHealthAction, // GET_AAVE_HEALTH   — read Aave health factor (sense)
+    repayAction, // AAVE_REPAY        — repay Aave debt via KeeperHub (act)
+    getExecutionAuditAction, // GET_EXECUTION_AUDIT — pull audit trail (audit)
+    transferAction, // TRANSFER          — generic native/ERC-20 transfer
+    checkBalanceAction, // CHECK_BALANCE     — generic balance read
   ],
 
   // DeepSeek model provider - uses chat completions API (not Responses API)
