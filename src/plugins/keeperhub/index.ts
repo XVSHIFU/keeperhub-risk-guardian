@@ -31,6 +31,7 @@ import { getHealthAction } from './actions/getHealth.ts';
 import { repayAction } from './actions/repay.ts';
 import { getExecutionAuditAction } from './actions/getExecutionAudit.ts';
 import { getDeepSeekProvider } from './deepseek.ts';
+import { aaveHealthProvider } from './providers/aaveHealth.ts';
 
 const configSchema = z.object({
   KEEPERHUB_API_KEY: z
@@ -45,6 +46,17 @@ const configSchema = z.object({
     .string()
     .optional()
     .default('sepolia'),
+  // Risk-guardian autonomous sense: the wallet to watch + the safety threshold
+  // below which the agent triggers a protective action (repay / supply).
+  KEEPERHUB_WATCH_WALLET: z
+    .string()
+    .optional()
+    .describe('Aave V3 wallet to monitor each turn (enables the AAVE_HEALTH provider)'),
+  KEEPERHUB_HEALTH_THRESHOLD: z
+    .string()
+    .optional()
+    .default('1.5')
+    .describe('Health factor below which the guardian acts (default 1.5)'),
 });
 
 export const keeperhubPlugin: Plugin = {
@@ -56,6 +68,8 @@ export const keeperhubPlugin: Plugin = {
     KEEPERHUB_API_KEY: process.env.KEEPERHUB_API_KEY || '',
     KEEPERHUB_BASE_URL: process.env.KEEPERHUB_BASE_URL || 'https://app.keeperhub.com',
     KEEPERHUB_DEFAULT_NETWORK: process.env.KEEPERHUB_DEFAULT_NETWORK || 'sepolia',
+    KEEPERHUB_WATCH_WALLET: process.env.KEEPERHUB_WATCH_WALLET || '',
+    KEEPERHUB_HEALTH_THRESHOLD: process.env.KEEPERHUB_HEALTH_THRESHOLD || '1.5',
   },
 
   async init(config: Record<string, string>) {
@@ -139,6 +153,7 @@ export const keeperhubPlugin: Plugin = {
   },
 
   providers: [
+    aaveHealthProvider, // AAVE_HEALTH — autonomous sense (watched wallet health factor each turn)
     {
       name: 'KEEPERHUB_STATUS',
       description: 'Provides KeeperHub connection status and configuration',

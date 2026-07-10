@@ -20,31 +20,9 @@ import {
   logger,
 } from '@elizaos/core';
 import { KeeperHubClient, CHAIN } from '../client.ts';
+import { classifyHealth } from '../aaveUtils.ts';
 
 const DEFAULT_THRESHOLD = '1.5'; // guard triggers protective action below this
-const ONE_E18 = 10n ** 18n;
-const MAX_UINT = 2n ** 256n - 1n;
-// Anything above 1e30 is treated as "effectively infinite" (Aave's no-debt sentinel).
-const INFINITE = 10n ** 30n;
-
-/** Interpret an Aave healthFactor (1e18-scaled BigInt string) as a risk verdict. */
-function classifyHealth(hfWei: string, threshold: number): {
-  human: string;
-  verdict: 'safe' | 'at-risk' | 'no-debt';
-} {
-  let hf: bigint;
-  try {
-    hf = BigInt(hfWei);
-  } catch {
-    return { human: 'unknown', verdict: 'no-debt' };
-  }
-  if (hf >= MAX_UINT || hf >= INFINITE) {
-    return { human: '∞ (no debt)', verdict: 'no-debt' };
-  }
-  const scaled = Number(hf) / 1e18; // human health factor (1.0 == just safe)
-  const verdict = scaled < threshold ? 'at-risk' : 'safe';
-  return { human: scaled.toFixed(3), verdict };
-}
 
 export const getHealthAction: Action = {
   name: 'GET_AAVE_HEALTH',

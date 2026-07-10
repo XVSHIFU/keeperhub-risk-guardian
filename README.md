@@ -154,6 +154,12 @@ MIT — see [LICENSE](./LICENSE).
 - KeeperHub docs: <https://docs.keeperhub.com>
 - KeeperHub MCP: <https://docs.keeperhub.com/ai-tools/mcp-server>
 
+## Project docs
+
+- [`ONBOARDING.md`](./ONBOARDING.md) — teardown of where building a KeeperHub agent gets stuck (and the fixes). Submitted for the Best Onboarding UX bounty.
+- [`DEMO_SCRIPT.md`](./DEMO_SCRIPT.md) — the ≤5-min demo video script.
+- [`SUBMISSION.md`](./SUBMISSION.md) — submission checklist + product description (target users + work during the hackathon).
+
 ---
 
 *中文文档见 [README.zh-CN.md](./README.zh-CN.md).*
